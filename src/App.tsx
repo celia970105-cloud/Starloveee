@@ -29,7 +29,7 @@ export default function App() {
   const [bannerUrl, setBannerUrl] = useState("https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200");
 
   // Floating pet greeting speech state
-  const [companionGreeting, setCompanionGreeting] = useState("哈囉！今天又是充滿星光的一天 ⭐");
+  const [companionGreeting, setCompanionGreeting] = useState("所以謝謝你的存在");
   const [showCompanionBubble, setShowCompanionBubble] = useState(true);
 
   // Sync settings and login on mount
@@ -56,12 +56,10 @@ export default function App() {
   // Rotate companion greetings
   useEffect(() => {
     const greetings = [
-      "Zack 在音樂盒裡唱的那首 Cosmic Symphony 真好聽呀！🎵",
-      "今天寫下給 Jeremy 與 Jiyu 的星願祝福信了嗎？💌",
-      "ALL FOR JIYU！星願應援站今天也暖洋洋的！✨",
-      "點擊我的『基因改裝』，可以幫我戴上黃金皇冠喔！👑",
-      "我是你專屬的應援小星寵，餵我吃糖果我就會升級唷！🍬",
-      "你看！美術館裡又新增了幾幅絕美的同人作品呢！🎨"
+      "所以謝謝你的存在",
+      "張極！張澤禹。",
+      "從未改變過",
+      "極禹TOP唯一美帝"
     ];
 
     const interval = setInterval(() => {
@@ -75,6 +73,30 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, []);
+
+  const refreshCurrentUser = async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`/api/users/profile/${currentUser.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentUser(data.user);
+        sessionStorage.setItem("starry_current_user", JSON.stringify(data.user));
+      }
+    } catch (e) {
+      console.error("Failed to refresh current user:", e);
+    }
+  };
+
+  // Poll current user profile for updated star_coins passively every 8 seconds
+  useEffect(() => {
+    if (!currentUser) return;
+    refreshCurrentUser(); // Refresh once on mount/change
+    const interval = setInterval(() => {
+      refreshCurrentUser();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
 
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
@@ -97,7 +119,7 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen text-white relative font-sans select-none flex flex-col justify-between">
+    <div className="min-h-screen text-white relative font-sans flex flex-col justify-between">
       {/* Absolute Layered Starry Night Background */}
       <StarryBackground />
 
@@ -421,7 +443,7 @@ export default function App() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <h4 className="text-sm font-semibold font-serif text-[#6E4B55] group-hover:text-[#FF799C]">🎵 黑膠應援播放器</h4>
-                        <p className="text-[10px] text-[#6E4B55]/50 mt-1">聽聽全球粉絲為 Zack ＆ Jeremy 應援的歌聲吧</p>
+                        <p className="text-[10px] text-[#6E4B55]/50 mt-1">來聽聽TOP唯一雙主唱的歌聲吧</p>
                       </div>
                       <Star className="absolute right-3 top-3 h-3 w-3 text-[#FF799C]/20" />
                     </button>
@@ -589,6 +611,7 @@ export default function App() {
                 currentUser={currentUser}
                 onLoginSuccess={handleLoginSuccess}
                 onLogout={handleLogout}
+                refreshCurrentUser={refreshCurrentUser}
               />
             </motion.div>
           )}

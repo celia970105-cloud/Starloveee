@@ -17,7 +17,8 @@ const SEED_DATA = {
       password: "Aa0955283881",
       role: "admin",
       avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=celia",
-      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200"
+      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200",
+      star_coins: 100
     },
     {
       id: "user_zack",
@@ -26,7 +27,8 @@ const SEED_DATA = {
       password: "password123",
       role: "user",
       avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=Zack",
-      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200"
+      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200",
+      star_coins: 100
     },
     {
       id: "user_jeremy",
@@ -35,7 +37,8 @@ const SEED_DATA = {
       password: "password123",
       role: "user",
       avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=Jeremy",
-      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200"
+      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200",
+      star_coins: 100
     },
     {
       id: "user_star",
@@ -44,7 +47,8 @@ const SEED_DATA = {
       password: "password123",
       role: "user",
       avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=Star",
-      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200"
+      background: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200",
+      star_coins: 100
     }
   ],
   posts_photos: [],
@@ -54,7 +58,9 @@ const SEED_DATA = {
   posts_music: [],
   pets: [],
   friendships: [] as any[],
-  coparent_groups: [] as any[]
+  coparent_groups: [] as any[],
+  interactions: [] as any[],
+  last_hourly_trigger: new Date().toISOString()
 };
 
 // Database helper functions
@@ -77,9 +83,44 @@ function readDb() {
       data.coparent_groups = [];
       modified = true;
     }
+    if (!data.interactions) {
+      data.interactions = [];
+      modified = true;
+    }
     if (!data.users) {
       data.users = SEED_DATA.users;
       modified = true;
+    }
+
+    // Ensure every user has star_coins
+    data.users.forEach((u: any) => {
+      if (u.star_coins === undefined) {
+        u.star_coins = 100;
+        modified = true;
+      }
+    });
+
+    // Hourly reward catch-up logic
+    if (!data.last_hourly_trigger) {
+      data.last_hourly_trigger = new Date().toISOString();
+      modified = true;
+    } else {
+      const lastTrigger = new Date(data.last_hourly_trigger).getTime();
+      const now = Date.now();
+      const diffMs = now - lastTrigger;
+      const oneHourMs = 60 * 60 * 1000;
+      if (diffMs >= oneHourMs) {
+        const elapsedHours = Math.floor(diffMs / oneHourMs);
+        if (elapsedHours > 0) {
+          const rewardAmount = elapsedHours * 20; // 20 star coins per hour
+          data.users.forEach((u: any) => {
+            u.star_coins = (u.star_coins || 0) + rewardAmount;
+          });
+          data.last_hourly_trigger = new Date(lastTrigger + elapsedHours * oneHourMs).toISOString();
+          modified = true;
+          console.log(`[Hourly Catch-up] Distributed ${rewardAmount} star coins to all users for ${elapsedHours} elapsed hours.`);
+        }
+      }
     }
 
     // Insert any missing seeded users
@@ -111,13 +152,44 @@ function writeDb(data: any) {
 // Ensure database is initialized at start
 readDb();
 
-app.use(express.json());
+// Active hourly timer (60 minutes) to reward all active users with +20 star coins passively
+setInterval(() => {
+  try {
+    const db = readDb();
+    db.users.forEach((u: any) => {
+      u.star_coins = (u.star_coins || 0) + 20;
+    });
+    db.last_hourly_trigger = new Date().toISOString();
+    writeDb(db);
+    console.log(`[Hourly Interval Triggered] Distributed 20 star coins passively to all users at ${new Date().toISOString()}`);
+  } catch (err) {
+    console.error("Failed to run hourly interval star coins reward:", err);
+  }
+}, 60 * 60 * 1000);
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // API Routes
 
 // Debug API to get everything
 app.get("/api/db", (req, res) => {
   res.json(readDb());
+});
+
+// Dev helper to trigger hourly reward manually
+app.post("/api/dev/trigger-hourly-coins", (req, res) => {
+  const db = readDb();
+  db.users.forEach((u: any) => {
+    u.star_coins = (u.star_coins || 0) + 20;
+  });
+  db.last_hourly_trigger = new Date().toISOString();
+  writeDb(db);
+  res.json({
+    success: true,
+    message: "🌟 成功手動模擬觸發每小時星星幣收益！所有使用者已獲得 +20 星星幣！",
+    users: db.users.map((u: any) => ({ id: u.id, username: u.username, star_coins: u.star_coins }))
+  });
 });
 
 // Auth API: login
@@ -210,6 +282,18 @@ app.post("/api/users/update", (req, res) => {
   res.json({ user: userWithoutPassword });
 });
 
+// Get User Profile Detail
+app.get("/api/users/profile/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDb();
+  const user = db.users.find(u => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const { password: _, ...userWithoutPassword } = user;
+  res.json({ user: userWithoutPassword });
+});
+
 // Submissions GET by type
 app.get("/api/posts/:type", (req, res) => {
   const { type } = req.params;
@@ -240,7 +324,7 @@ app.post("/api/posts/:type", (req, res) => {
     return res.status(400).json({ error: "Payload is required" });
   }
 
-  const isUserAdmin = payload.role === "admin";
+  const isUserAdmin = payload.role === "admin" || (payload.email && payload.email === "celia970105@gmail.com");
   const newPostId = `${type.substring(0, 1)}_${Date.now()}`;
   
   const basePost = {
@@ -260,6 +344,15 @@ app.post("/api/posts/:type", (req, res) => {
       category: payload.category || "General"
     };
     db.posts_photos.push(post);
+
+    // Reward user with 50 star coins for uploading a photo
+    if (payload.user_id && payload.user_id !== "anonymous") {
+      const userIdx = db.users.findIndex((u: any) => u.id === payload.user_id);
+      if (userIdx !== -1) {
+        db.users[userIdx].star_coins = (db.users[userIdx].star_coins || 0) + 50;
+      }
+    }
+
     writeDb(db);
     return res.json({ success: true, post });
   } 
@@ -303,13 +396,30 @@ app.post("/api/posts/:type", (req, res) => {
   }
 
   if (type === "music") {
+    const title = (payload.title || "").trim();
+    if (!title) {
+      return res.status(400).json({ error: "請填寫音樂名稱！" });
+    }
+    const exists = db.posts_music.some((m: any) => m.title.trim().toLowerCase() === title.toLowerCase());
+    if (exists) {
+      return res.status(400).json({ error: "此音樂名稱已存在，請使用其他名稱！" });
+    }
+
+    const audioUrl = (payload.audio_url || "").trim();
+    const isBili = audioUrl.toLowerCase().includes("bilibili.com") || audioUrl.toLowerCase().includes("b23.tv");
+    const isQQ = audioUrl.toLowerCase().includes("qq.com");
+    if (!isBili && !isQQ) {
+      return res.status(400).json({ error: "音樂網址格式錯誤！應援投稿僅限使用 QQ音樂 或 bilibili 網址。" });
+    }
+
     const post = {
       ...basePost,
-      title: payload.title || "Untitled Song",
+      title,
       artist: payload.artist || "Unknown Artist",
-      audio_url: payload.audio_url || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      audio_url: audioUrl,
       cover_url: payload.cover_url || "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500",
-      duration: payload.duration || "3:30"
+      duration: payload.duration || "3:30",
+      status: basePost.status
     };
     db.posts_music.push(post);
     writeDb(db);
@@ -498,9 +608,24 @@ app.post("/api/friends/add", (req, res) => {
   }
 
   db.friendships.push({ userId1: userId, userId2: targetUser.id });
+
+  // Reward both users +30 star coins for friend interaction
+  const u1Idx = db.users.findIndex((u: any) => u.id === userId);
+  const u2Idx = db.users.findIndex((u: any) => u.id === targetUser.id);
+  if (u1Idx !== -1) {
+    db.users[u1Idx].star_coins = (db.users[u1Idx].star_coins || 0) + 30;
+  }
+  if (u2Idx !== -1) {
+    db.users[u2Idx].star_coins = (db.users[u2Idx].star_coins || 0) + 30;
+  }
+
   writeDb(db);
 
-  res.json({ success: true, friend: { id: targetUser.id, username: targetUser.username, avatar: targetUser.avatar } });
+  res.json({ 
+    success: true, 
+    friend: { id: targetUser.id, username: targetUser.username, avatar: targetUser.avatar },
+    message: `成功添加 ${targetUser.username} 為好友！雙方各獲得 30 星星幣 🪙！`
+  });
 });
 
 // Get Friends list
@@ -518,6 +643,202 @@ app.get("/api/friends/:userId", (req, res) => {
     .map((u: any) => ({ id: u.id, username: u.username, avatar: u.avatar }));
 
   res.json(friends);
+});
+
+// Friends API: Interact (Poke / Send love / Bless)
+app.post("/api/friends/interact", (req, res) => {
+  const { userId, targetId } = req.body;
+  if (!userId || !targetId) {
+    return res.status(400).json({ error: "缺少參數" });
+  }
+  const db = readDb();
+  const sender = db.users.find((u: any) => u.id === userId);
+  const receiver = db.users.find((u: any) => u.id === targetId);
+  if (!sender || !receiver) {
+    return res.status(404).json({ error: "找不到該用戶" });
+  }
+  
+  // Reward sender for initiating: +15 star coins
+  sender.star_coins = (sender.star_coins || 0) + 15;
+  // Reward receiver for being interacted with: +30 star coins!
+  receiver.star_coins = (receiver.star_coins || 0) + 30;
+  
+  writeDb(db);
+  res.json({
+    success: true,
+    message: `✨ 你與 ${receiver.username} 互動了！你獲得了 15 星星幣 🪙，${receiver.username} 獲得了 30 星星幣 🪙！`,
+    sender_coins: sender.star_coins,
+    receiver_coins: receiver.star_coins
+  });
+});
+
+// Friends API: Fetch a friend's pet home room details
+app.get("/api/friends/room/:friendId", (req, res) => {
+  const { friendId } = req.params;
+  const db = readDb();
+  
+  const friend = db.users.find((u: any) => u.id === friendId);
+  if (!friend) {
+    return res.status(404).json({ error: "找不到該好友" });
+  }
+
+  // Find single pet or create a starter if not exists
+  let pet = db.pets.find((p: any) => p.owner_id === friendId);
+  if (!pet) {
+    pet = {
+      id: `pet_${Date.now()}`,
+      name: `${friend.username}的萌星`,
+      owner_id: friend.id,
+      owner_name: friend.username,
+      xp: 0,
+      level: 1,
+      type: "Star Bunny",
+      color: "Pink",
+      custom_appearance: { accessory: "None", vibe: "Cute" },
+      home_json: { decor: "Stardust", bed: "Cloud Bed" },
+      created_at: new Date().toISOString()
+    };
+    db.pets.push(pet);
+    writeDb(db);
+  }
+
+  // Find their co-parenting groups to see if they share any homes
+  const coparentGroups = db.coparent_groups.filter(
+    (g: any) => g.member_ids && g.member_ids.includes(friendId)
+  );
+
+  res.json({
+    friend: { id: friend.id, username: friend.username, avatar: friend.avatar, background: friend.background },
+    pet,
+    coparentGroups
+  });
+});
+
+// Friends API: Interact with friend's pet during visitation
+app.post("/api/friends/pet/interact-visit", (req, res) => {
+  const { userId, targetId, isGroup } = req.body;
+  if (!userId || !targetId) {
+    return res.status(400).json({ error: "缺少必要參數" });
+  }
+
+  const db = readDb();
+  if (!db.interactions) {
+    db.interactions = [];
+  }
+
+  const now = Date.now();
+  const nowIso = new Date().toISOString();
+
+  // Find visitor
+  const visitor = db.users.find((u: any) => u.id === userId);
+  if (!visitor) {
+    return res.status(404).json({ error: "找不到訪客用戶數據" });
+  }
+
+  // Get previous interactions of this user with this target pet/group
+  const targetInteractions = db.interactions.filter(
+    (item: any) => item.userId === userId && item.targetId === targetId
+  );
+
+  let lastTime = 0;
+  if (targetInteractions.length > 0) {
+    targetInteractions.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    lastTime = new Date(targetInteractions[0].timestamp).getTime();
+  }
+
+  const timeDiffSec = lastTime > 0 ? (now - lastTime) / 1000 : 99999;
+
+  // Interactions count in last 10 minutes (frequency check)
+  const tenMinutesAgo = now - 10 * 60 * 1000;
+  const recentCount = targetInteractions.filter((item: any) => new Date(item.timestamp).getTime() > tenMinutesAgo).length;
+
+  let coinsEarned = 0;
+  let statusMessage = "";
+
+  if (timeDiffSec < 6) {
+    // Too frequent, prevent abuse
+    coinsEarned = 1;
+    statusMessage = `⏱️ 互動太頻繁囉！(距離上次陪伴僅隔了 ${Math.round(timeDiffSec)} 秒) 小萌星害羞了，本次獲得象徵性的 1 星星幣 🪙。試試看每隔一會再輕輕撫摸牠吧！`;
+  } else if (timeDiffSec < 30) {
+    // Regular frequency
+    coinsEarned = 6;
+    statusMessage = `🌸 溫馨陪伴中！(距離上次陪伴隔了 ${Math.round(timeDiffSec)} 秒) 寵物對你感到熟悉了，恭喜獲得 +6 星星幣 🪙！`;
+  } else {
+    // High quality care, slow frequency (30s+ elapsed)
+    coinsEarned = 16;
+    statusMessage = `✨ 深度陪伴獎勵！(距離上次陪伴已過 ${Math.round(timeDiffSec)} 秒) 你在好友家園細心照料小星寵，獲得最高規格的 +16 星星幣 🪙！`;
+  }
+
+  // Limit visitor earning to 15 transactions a day from friend interaction
+  const todayStart = new Date();
+  todayStart.setHours(0,0,0,0);
+  const todayInteractions = db.interactions.filter(
+    (item: any) => item.userId === userId && new Date(item.timestamp).getTime() > todayStart.getTime()
+  );
+
+  if (todayInteractions.length >= 20) {
+    coinsEarned = 1;
+    statusMessage = `🏆 達今日每日互動上限！您的每日關懷愛心已滿，本次互動僅獲得 1 星星幣 🪙。星寵們為您的溫暖深深感動！`;
+  }
+
+  // Award coin to visitor
+  visitor.star_coins = (visitor.star_coins || 0) + coinsEarned;
+
+  // Award 5 coins to target owner/group
+  let targetOwnerName = "";
+  if (isGroup) {
+    const group = db.coparent_groups.find((g: any) => g.id === targetId);
+    if (group) {
+      group.star_coins = (group.star_coins || 0) + 5;
+      targetOwnerName = `共同家庭【${group.name}】`;
+    }
+  } else {
+    // Single pet
+    const targetPet = db.pets.find((p: any) => p.id === targetId || p.owner_id === targetId);
+    if (targetPet) {
+      const owner = db.users.find((u: any) => u.id === targetPet.owner_id);
+      if (owner) {
+        owner.star_coins = (owner.star_coins || 0) + 5;
+        targetOwnerName = owner.username;
+      }
+    }
+  }
+
+  // Push interaction log
+  db.interactions.push({
+    id: `inter_${Date.now()}`,
+    userId,
+    targetId,
+    timestamp: nowIso
+  });
+
+  writeDb(db);
+
+  res.json({
+    success: true,
+    coinsEarned,
+    message: statusMessage,
+    visitorCoins: visitor.star_coins,
+    targetOwner: targetOwnerName,
+    giftCoins: 5
+  });
+});
+
+// Co-parent members detail resolver
+app.get("/api/coparent/members/:groupId", (req, res) => {
+  const { groupId } = req.params;
+  const db = readDb();
+  
+  const group = db.coparent_groups.find((g: any) => g.id === groupId);
+  if (!group) {
+    return res.status(404).json({ error: "找不到該共同飼養家庭" });
+  }
+
+  const members = db.users
+    .filter((u: any) => group.member_ids && group.member_ids.includes(u.id))
+    .map((u: any) => ({ id: u.id, username: u.username, avatar: u.avatar }));
+
+  res.json(members);
 });
 
 // Get Co-parenting Groups
@@ -669,6 +990,12 @@ app.post("/api/coparent/action", (req, res) => {
     group.star_coins = (group.star_coins || 0) + coinsEarned;
     group.last_photo_times[userId] = new Date().toISOString();
 
+    // Reward individual user +50 star coins
+    const uIdx = db.users.findIndex((u: any) => u.id === userId);
+    if (uIdx !== -1) {
+      db.users[uIdx].star_coins = (db.users[uIdx].star_coins || 0) + 50;
+    }
+
     const userObj = db.users.find((u: any) => u.id === userId);
     const newPhoto = {
       id: `photo_${Date.now()}`,
@@ -682,7 +1009,12 @@ app.post("/api/coparent/action", (req, res) => {
     if (!group.photos) group.photos = [];
     group.photos.unshift(newPhoto);
 
-    message = `上傳成功！獲得了 ${coinsEarned} 星星幣 🪙！`;
+    message = `上傳成功！家庭獲得了 ${coinsEarned} 星星幣 🪙，你個人也獲得了 50 星星幣 🪙！`;
+  }
+  else if (actionType === "save-skin") {
+    const { customSkin } = payload;
+    group.pet.custom_skin = customSkin;
+    message = "成功保存了寵物的自定義繪製外觀！✨";
   }
 
   db.coparent_groups[groupIdx] = group;

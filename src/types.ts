@@ -5,6 +5,7 @@ export interface User {
   role: "admin" | "user";
   avatar: string;
   background: string;
+  star_coins?: number;
 }
 
 export interface PhotoPost {

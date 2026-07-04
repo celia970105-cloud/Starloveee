@@ -18,7 +18,6 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [imageUrl, setImageUrl] = useState("");
-  const [externalLink, setExternalLink] = useState("");
   const [description, setDescription] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -45,13 +44,31 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
     fetchArtworks();
   }, []);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        setSubmitError("圖片檔案過大，請選擇 10MB 以下的圖片！");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageUrl(reader.result as string);
+      };
+      reader.onerror = () => {
+        setSubmitError("讀取圖片檔案失敗，請重試。");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError("");
     setSubmitSuccess(false);
 
     if (!title || !imageUrl || !description) {
-      setSubmitError("請填寫所有必填欄位 (畫作標題、圖片網址、創作說明)！");
+      setSubmitError("請填寫所有必填欄位 (畫作標題、選擇上傳圖片、創作說明)！");
       return;
     }
 
@@ -59,7 +76,7 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
       const payload = {
         title,
         image_url: imageUrl,
-        external_link: externalLink,
+        external_link: "",
         description,
         user_id: currentUser?.id || "anonymous",
         username: currentUser?.username || "Anonymous Visitor",
@@ -76,7 +93,6 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
         setSubmitSuccess(true);
         setTitle("");
         setImageUrl("");
-        setExternalLink("");
         setDescription("");
         if (currentUser?.role === "admin") {
           fetchArtworks();
@@ -90,7 +106,7 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
         }, 2000);
       } else {
         const data = await res.json();
-        setSubmitError(data.error || "投稿失敗，請確認圖片網址。");
+        setSubmitError(data.error || "投稿失敗，請確認圖片格式。");
       }
     } catch (err) {
       setSubmitError("伺服器連線中斷。");
@@ -283,7 +299,7 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
       {/* Submission Form Modal */}
       <AnimatePresence>
         {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -328,27 +344,54 @@ export default function MuseumModule({ currentUser, onRefreshData }: MuseumModul
                   </div>
 
                   <div>
-                    <label className="block text-xs font-mono text-[#6E4B55]/70 mb-1.5">畫作圖片網址 *</label>
-                    <input
-                      type="url"
-                      required
-                      placeholder="e.g. https://images.unsplash.com/..."
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      className="w-full bg-[#FFF6F2]/60 border border-[#FF799C]/20 focus:border-[#FF799C] focus:outline-none text-[#6E4B55] text-sm px-3.5 py-2.5 rounded-xl transition-all font-mono"
-                    />
-                    <span className="text-[10px] text-[#6E4B55]/50 mt-1 block">提示：請填寫公開可存取的圖片網址 (JPG / PNG)。</span>
-                  </div>
+                    <label className="block text-xs font-mono text-[#6E4B55]/70 mb-1.5">畫作圖片 * (可從相簿上傳，或輸入圖片網址)</label>
+                    
+                    <div className="flex flex-col gap-3">
+                      <div className="flex gap-2">
+                        <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-[#FF799C]/30 hover:border-[#FF799C] bg-[#FFF6F2]/40 rounded-xl p-4 cursor-pointer transition-all hover:bg-[#FFF6F2]/80 group">
+                          <Plus className="h-5 w-5 text-[#FF799C]/70 group-hover:text-[#FF799C] transition-colors" />
+                          <span className="text-xs text-[#6E4B55]/70 mt-1">從相簿 / 本機選擇圖片上傳</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-mono text-[#6E4B55]/70 mb-1.5">創作者個人主頁 / Pixiv 連結 (選填)</label>
-                    <input
-                      type="url"
-                      placeholder="e.g. https://pixiv.net/users/..."
-                      value={externalLink}
-                      onChange={(e) => setExternalLink(e.target.value)}
-                      className="w-full bg-[#FFF6F2]/60 border border-[#FF799C]/20 focus:border-[#FF799C] focus:outline-none text-[#6E4B55] text-sm px-3.5 py-2.5 rounded-xl transition-all font-mono"
-                    />
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#6E4B55]/40 text-xs">
+                          網址:
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="或在此貼上圖片網址..."
+                          value={imageUrl.startsWith("data:") ? "" : imageUrl}
+                          onChange={(e) => setImageUrl(e.target.value)}
+                          className="w-full bg-[#FFF6F2]/60 border border-[#FF799C]/20 focus:border-[#FF799C] focus:outline-none text-[#6E4B55] text-sm pl-11 pr-3.5 py-2.5 rounded-xl transition-all font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {imageUrl && (
+                      <div className="mt-3 relative rounded-xl overflow-hidden border border-[#FF799C]/20 bg-gray-50 h-28 flex items-center justify-center">
+                        <img 
+                          src={imageUrl} 
+                          alt="畫作預覽" 
+                          className="h-full w-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setImageUrl("")}
+                          className="absolute top-2 right-2 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all"
+                          title="清除圖片"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div>

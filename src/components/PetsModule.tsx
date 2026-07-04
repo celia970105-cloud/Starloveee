@@ -6,6 +6,7 @@ import {
   Coins, Plus, CheckCircle, Info, ChevronRight, X
 } from "lucide-react";
 import { User } from "../types";
+import PetsCanvasBoard from "./PetsCanvasBoard";
 
 interface PetsModuleProps {
   currentUser: User | null;
@@ -208,8 +209,18 @@ interface FallingItem {
 export default function PetsModule({ currentUser }: PetsModuleProps) {
   const localKey = `local_star_pet_guest`;
 
-  // Toggle Modes: "single" (Solo/Local) or "coparent" (Shared Home)
-  const [activeTab, setActiveTab] = useState<"single" | "coparent">("single");
+  // Toggle Modes: "single" (Solo/Local) or "coparent" (Shared Home) or "friend" (Visiting Friend)
+  const [activeTab, setActiveTab] = useState<"single" | "coparent" | "friend">("single");
+
+  // Friend Visitation State
+  const [visitingFriend, setVisitingFriend] = useState<any | null>(null);
+  const [visitedPet, setVisitedPet] = useState<any | null>(null);
+  const [visitedCoparentGroups, setVisitedCoparentGroups] = useState<any[]>([]);
+  const [selectedVisitedGroup, setSelectedVisitedGroup] = useState<any | null>(null);
+  const [isVisitingGroup, setIsVisitingGroup] = useState(false);
+  const [activeGroupMembers, setActiveGroupMembers] = useState<any[]>([]); // To show active coparent members list
+  const [visitedGroupMembers, setVisitedGroupMembers] = useState<any[]>([]); // To show visited coparent members list
+  const [interactionRewardMsg, setInteractionRewardMsg] = useState("");
 
   // Local/Solo state
   const [soloPetName, setSoloPetName] = useState(() => {
@@ -260,6 +271,13 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
     return { cotton_candy: 3, peach_juice: 2, star_macaron: 1, cherry_pudding: 1 };
   });
 
+  const [soloCustomSkin, setSoloCustomSkin] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(`${localKey}_custom_skin`) || "";
+    }
+    return "";
+  });
+
   // Co-parenting full-stack state
   const [coparentGroups, setCoparentGroups] = useState<any[]>([]);
   const [activeGroup, setActiveGroup] = useState<any | null>(null);
@@ -282,12 +300,16 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
   const [isFridgeOpen, setIsFridgeOpen] = useState(false);
   const [fridgeMessage, setFridgeMessage] = useState("");
 
+  // Custom Skin Canvas state
+  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
+
   // Interaction State
   const [bubbleText, setBubbleText] = useState(`點擊我可以和我說話，或者開啟草莓冰箱餵我吃點心哦！✨`);
   const [showBubble, setShowBubble] = useState(true);
   const [isDancing, setIsDancing] = useState(false);
   const [fallingItems, setFallingItems] = useState<FallingItem[]>([]);
   const [expression, setExpression] = useState<"blink" | "happy" | "shy" | "glow">("happy");
+  const [petState, setPetState] = useState<"idle" | "sitting" | "sleeping">("idle");
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [feedEffect, setFeedEffect] = useState<string | null>(null);
@@ -301,7 +323,65 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
     localStorage.setItem(`${localKey}_coins`, soloCoins.toString());
     localStorage.setItem(`${localKey}_furniture`, JSON.stringify(soloFurniture));
     localStorage.setItem(`${localKey}_fridge`, JSON.stringify(soloFridgeFood));
-  }, [soloPetName, soloFullness, soloLove, soloCoins, soloFurniture, soloFridgeFood]);
+    localStorage.setItem(`${localKey}_custom_skin`, soloCustomSkin);
+  }, [soloPetName, soloFullness, soloLove, soloCoins, soloFurniture, soloFridgeFood, soloCustomSkin]);
+
+  // Fetch active coparent group member details dynamically
+  useEffect(() => {
+    if (activeGroup?.id) {
+      fetch(`/api/coparent/members/${activeGroup.id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setActiveGroupMembers(data);
+          }
+        })
+        .catch(err => console.error("Error loading active group members:", err));
+    } else {
+      setActiveGroupMembers([]);
+    }
+  }, [activeGroup?.id]);
+
+  const handleVisitFriendRoom = async (friendId: string) => {
+    try {
+      const res = await fetch(`/api/friends/room/${friendId}`);
+      if (!res.ok) {
+        throw new Error("無法載入好友的家園資訊");
+      }
+      const data = await res.json();
+      setVisitingFriend(data.friend);
+      setVisitedPet(data.pet);
+      setVisitedCoparentGroups(data.coparentGroups || []);
+      
+      // Reset visited room sub-states
+      setIsVisitingGroup(false);
+      setSelectedVisitedGroup(null);
+      setVisitedGroupMembers([{ id: data.friend.id, username: data.friend.username, avatar: data.friend.avatar }]);
+      
+      setActiveTab("friend");
+      setBubbleText(`✨ 歡迎參觀 ${data.friend.username} 的星空萌寵屋！快戳一戳星寵與牠互動、並贈予溫暖與陪伴吧！🌸`);
+      setInteractionRewardMsg("");
+    } catch (err: any) {
+      alert(err.message || "載入好友家園失敗");
+    }
+  };
+
+  const handleSelectVisitedGroup = async (group: any) => {
+    setSelectedVisitedGroup(group);
+    setIsVisitingGroup(true);
+    setInteractionRewardMsg("");
+    
+    // Fetch co-parent members list
+    try {
+      const res = await fetch(`/api/coparent/members/${group.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setVisitedGroupMembers(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // Load co-parenting data from API when logged in
   useEffect(() => {
@@ -589,6 +669,59 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
 
   // Star Click interactions
   const handleStarClick = () => {
+    if (activeTab === "friend") {
+      if (!currentUser) {
+        alert("互動獲取星星幣需要登入星願帳號喔！已為您在下方顯示模擬快速登入。");
+        return;
+      }
+      setIsDancing(true);
+      const expressions: ("blink" | "happy" | "shy" | "glow")[] = ["blink", "happy", "shy", "glow"];
+      setExpression(expressions[Math.floor(Math.random() * expressions.length)]);
+
+      const targetId = isVisitingGroup ? selectedVisitedGroup?.id : (visitedPet?.id || visitingFriend?.id);
+      if (!targetId) return;
+
+      fetch("/api/friends/pet/interact-visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          targetId,
+          isGroup: isVisitingGroup
+        })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setInteractionRewardMsg(data.message);
+            setBubbleText(`✨ 哇！謝謝你的溫暖陪伴！${visitingFriend?.username} 的星寵特別開心地對你眨了眨眼！💖`);
+            if (data.visitorCoins !== undefined) {
+              setSoloCoins(data.visitorCoins);
+            }
+          } else {
+            alert(data.error || "互動失敗");
+          }
+        })
+        .catch(err => console.error("Error during visitor interaction:", err));
+
+      setTimeout(() => {
+        setIsDancing(false);
+      }, 1000);
+      return;
+    }
+
+    if (petState !== "idle") {
+      setPetState("idle");
+      const name = activeTab === "single" ? soloPetName : activeGroup?.pet?.name || "小星";
+      setBubbleText(`哇！我醒來/站起來囉！精神飽滿！☀️`);
+      setIsDancing(true);
+      setExpression("happy");
+      setTimeout(() => {
+        setIsDancing(false);
+      }, 1000);
+      return;
+    }
+
     setIsDancing(true);
     const expressions: ("blink" | "happy" | "shy" | "glow")[] = ["blink", "happy", "shy", "glow"];
     const randExpr = expressions[Math.floor(Math.random() * expressions.length)];
@@ -714,12 +847,85 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
     setExpression("happy");
   };
 
-  const currentPetName = activeTab === "single" ? soloPetName : activeGroup?.pet?.name || "蜜桃粉萌星";
-  const currentFullness = activeTab === "single" ? soloFullness : activeGroup?.pet?.fullness || 50;
-  const currentLove = activeTab === "single" ? soloLove : activeGroup?.pet?.love || 50;
-  const currentCoins = activeTab === "single" ? soloCoins : activeGroup?.star_coins || 0;
-  const currentFurnitureList = activeTab === "single" ? soloFurniture : activeGroup?.pet?.furniture || DEFAULT_FURNITURE;
-  const currentFridgeFood = activeTab === "single" ? soloFridgeFood : activeGroup?.refrigerator_food || {};
+  const handleSaveCustomSkin = async (dataUrl: string) => {
+    if (activeTab === "single") {
+      setSoloCustomSkin(dataUrl);
+      setBubbleText(`哇！這是我新的彩繪服裝嗎？畫得太好看了，我很喜歡喔！✨`);
+      setExpression("glow");
+    } else {
+      if (!activeGroup) return;
+      try {
+        const res = await executeCoparentAction("save-skin", { customSkin: dataUrl });
+        if (res) {
+          setBubbleText(`哇！這是我新繪製的家庭共享外觀嗎？大家畫得太棒了！✨`);
+          setExpression("glow");
+        }
+      } catch (e: any) {
+        alert(e.message);
+      }
+    }
+  };
+
+  const handleClearCustomSkin = async () => {
+    if (activeTab === "single") {
+      setSoloCustomSkin("");
+      setBubbleText(`衣服洗乾淨囉，回歸最自然純粹的粉嫩棉花糖外表！🌸`);
+      setExpression("happy");
+    } else {
+      if (!activeGroup) return;
+      try {
+        const res = await executeCoparentAction("save-skin", { customSkin: "" });
+        if (res) {
+          setBubbleText(`共享外觀洗乾淨囉，回歸最經典的粉萌樣子！🌸`);
+          setExpression("happy");
+        }
+      } catch (e: any) {
+        alert(e.message);
+      }
+    }
+  };
+
+  const currentPetName = activeTab === "single"
+    ? soloPetName
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.pet?.name || "蜜桃粉萌星") : (visitedPet?.name || "小星"))
+    : activeGroup?.pet?.name || "蜜桃粉萌星";
+
+  const currentFullness = activeTab === "single"
+    ? soloFullness
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.pet?.fullness || 60) : 75)
+    : activeGroup?.pet?.fullness || 50;
+
+  const currentLove = activeTab === "single"
+    ? soloLove
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.pet?.love || 65) : 80)
+    : activeGroup?.pet?.love || 50;
+
+  const currentCoins = activeTab === "single"
+    ? soloCoins
+    : activeTab === "friend"
+    ? soloCoins // Visitor's own coins wallet
+    : activeGroup?.star_coins || 0;
+
+  const currentFurnitureList = activeTab === "single"
+    ? soloFurniture
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.pet?.furniture || DEFAULT_FURNITURE) : DEFAULT_FURNITURE)
+    : activeGroup?.pet?.furniture || DEFAULT_FURNITURE;
+
+  const currentFridgeFood = activeTab === "single"
+    ? soloFridgeFood
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.refrigerator_food || {}) : {})
+    : activeGroup?.refrigerator_food || {};
+
+  const currentCustomSkin = activeTab === "single"
+    ? soloCustomSkin
+    : activeTab === "friend"
+    ? (isVisitingGroup ? (selectedVisitedGroup?.pet?.custom_skin || "") : (visitedPet?.custom_skin || ""))
+    : activeGroup?.pet?.custom_skin || "";
 
   return (
     <div className="relative w-full max-w-5xl mx-auto glass border border-[#FF799C]/20 rounded-[36px] p-6 text-center overflow-hidden min-h-[620px] flex flex-col justify-between shadow-xl">
@@ -763,7 +969,10 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
         {/* Cute Segmented Mode Controller */}
         <div className="flex gap-2 bg-[#FF799C]/5 border border-[#FF799C]/15 p-1 rounded-2xl mb-4">
           <button
-            onClick={() => setActiveTab("single")}
+            onClick={() => {
+              setVisitingFriend(null);
+              setActiveTab("single");
+            }}
             className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all ${activeTab === "single" ? "bg-[#FF799C] text-white shadow-sm" : "text-[#6E4B55]/70 hover:text-[#FF799C]"}`}
           >
             ✨ 單人私密小屋
@@ -773,12 +982,22 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
               if (!currentUser) {
                 alert("共同飼養需要登入星願帳號喔！已為您在下方顯示模擬登入引導。");
               }
+              setVisitingFriend(null);
               setActiveTab("coparent");
             }}
             className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 ${activeTab === "coparent" ? "bg-[#FF799C] text-white shadow-sm" : "text-[#6E4B55]/70 hover:text-[#FF799C]"}`}
           >
             <Users className="h-3 w-3" /> 2~6人共同飼養星家
           </button>
+          {activeTab === "friend" && (
+            <button
+              onClick={() => {}}
+              className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-[#FF799C] to-[#FFCCDD] text-white shadow-sm flex items-center gap-1.5 border border-[#FF799C]/15"
+            >
+              <Sparkles className="h-3 w-3 animate-pulse" />
+              <span>參訪中：{visitingFriend?.username}</span>
+            </button>
+          )}
         </div>
 
         {/* Guest Warning Banner with Simulated Quick-Login */}
@@ -800,6 +1019,55 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
               <span>⚡ 模擬快速登入</span>
               <ChevronRight className="h-3 w-3" />
             </button>
+          </div>
+        )}
+
+        {/* FRIEND VISITOR ROOM CONTROLLER & WELCOME BANNER */}
+        {activeTab === "friend" && visitingFriend && (
+          <div className="bg-[#FFF4F7]/90 border-2 border-[#FF799C]/25 rounded-[22px] p-4 mb-5 max-w-2xl w-full flex flex-col sm:flex-row items-center justify-between gap-4 text-left shadow-sm z-10 relative">
+            <div className="flex items-start gap-3 flex-1">
+              <img src={visitingFriend.avatar} alt="Avatar" className="w-11 h-11 rounded-full border-2 border-[#FF799C]/20 shadow-sm shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-[#FF799C] flex items-center gap-1.5">
+                  🌟 正在拜訪 {visitingFriend.username} 的星空萌星家園
+                </h4>
+                <p className="text-[10px] text-[#6E4B55]/75 leading-relaxed mt-0.5">
+                  戳戳牠進行互動陪伴！系統將<b>根據陪伴時間與頻率</b>自動計算並發放星星幣獎勵 🪙，且好友亦能獲得祝福加成！
+                </p>
+                {interactionRewardMsg && (
+                  <div className="mt-1.5 text-[9.5px] text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200 inline-block font-bold animate-pulse">
+                    {interactionRewardMsg}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Visited Room Switcher */}
+            <div className="flex flex-col items-stretch sm:items-end gap-1.5 border-t sm:border-t-0 border-[#FF799C]/10 pt-2 sm:pt-0 shrink-0">
+              <span className="text-[8px] text-[#6E4B55]/60 font-mono text-center sm:text-right block">切換該玩家的家園：</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => {
+                    setIsVisitingGroup(false);
+                    setSelectedVisitedGroup(null);
+                    setVisitedGroupMembers([{ id: visitingFriend.id, username: visitingFriend.username, avatar: visitingFriend.avatar }]);
+                    setInteractionRewardMsg("");
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-[9px] font-bold border transition-all active:scale-95 ${!isVisitingGroup ? "bg-[#FF799C] text-white border-[#FF799C] shadow-sm" : "bg-white text-[#6E4B55] border-[#FF799C]/15 hover:bg-pink-50/50"}`}
+                >
+                  🏠 個人私密房
+                </button>
+                {visitedCoparentGroups.map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => handleSelectVisitedGroup(g)}
+                    className={`px-3 py-1.5 rounded-xl text-[9px] font-bold border transition-all active:scale-95 ${isVisitingGroup && selectedVisitedGroup?.id === g.id ? "bg-[#FF799C] text-white border-[#FF799C] shadow-sm" : "bg-white text-[#6E4B55] border-[#FF799C]/15 hover:bg-pink-50/50"}`}
+                  >
+                    🏡 {g.name}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -853,6 +1121,12 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                 </button>
               </div>
             )
+          ) : activeTab === "friend" ? (
+            <div className="flex flex-col items-center">
+              <h2 className="text-2xl sm:text-3xl font-serif font-light text-[#FF799C] tracking-wide">
+                {currentPetName} 的星空夢幻小屋 🌸
+              </h2>
+            </div>
           ) : (
             // Co-parenting group pet header
             activeGroup ? (
@@ -967,6 +1241,12 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                   if (f.id === "fridge") {
                     setIsFridgeOpen(true);
                     setFridgeMessage(`🍰 歡迎光臨草莓波點冰箱！點擊食物餵食 ${currentPetName}，或是採購更多美味吧！`);
+                  } else if (f.id === "bed") {
+                    setPetState("sleeping");
+                    setBubbleText(`${currentPetName} 躺在軟綿綿的草莓棉花糖大床上，正甜甜地睡著呢... 🐑 zZZ (點擊寵物可喚醒)`);
+                  } else if (f.id === "sofa") {
+                    setPetState("sitting");
+                    setBubbleText(`${currentPetName} 舒服地坐在蜜桃雲朵沙發上，晃晃小腿感覺超級愜意！🍵 (點擊寵物可站立)`);
                   }
                 }}
               >
@@ -1006,7 +1286,31 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
             </div>
 
             {/* THE REDESIGNED EXTREMELY CUTELY ROUNDED PINK COTTON CANDY PET STAR */}
-            <div className="absolute bottom-5 left-1/2 transform -translate-x-1/2 z-20">
+            <div 
+              className="z-20 transition-all duration-700 ease-out"
+              style={
+                petState === "sitting" && currentFurnitureList.find((f: any) => f.id === "sofa")
+                  ? {
+                      position: "absolute",
+                      left: ((currentFurnitureList.find((f: any) => f.id === "sofa")?.x ?? 190) - 35) + "px",
+                      top: ((currentFurnitureList.find((f: any) => f.id === "sofa")?.y ?? 160) - 45) + "px",
+                      transform: "none",
+                    }
+                  : petState === "sleeping" && currentFurnitureList.find((f: any) => f.id === "bed")
+                  ? {
+                      position: "absolute",
+                      left: ((currentFurnitureList.find((f: any) => f.id === "bed")?.x ?? 20) - 35) + "px",
+                      top: ((currentFurnitureList.find((f: any) => f.id === "bed")?.y ?? 150) - 35) + "px",
+                      transform: "none",
+                    }
+                  : {
+                      position: "absolute",
+                      bottom: "20px",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                    }
+              }
+            >
               
               {/* Feeding floating food items indicator */}
               <AnimatePresence>
@@ -1023,6 +1327,33 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                 )}
               </AnimatePresence>
 
+              {/* Floating sleep Zzz letters if sleeping */}
+              {petState === "sleeping" && (
+                <div className="absolute top-[-30px] right-[-10px] z-30 flex flex-col pointer-events-none select-none">
+                  <motion.span 
+                    animate={{ y: [-5, -25], x: [0, 8, 0], opacity: [0, 1, 0], scale: [0.8, 1.2, 0.9] }} 
+                    transition={{ repeat: Infinity, duration: 2, delay: 0 }}
+                    className="text-xs font-bold text-[#FF799C]"
+                  >
+                    z
+                  </motion.span>
+                  <motion.span 
+                    animate={{ y: [-5, -25], x: [0, -6, 0], opacity: [0, 1, 0], scale: [0.8, 1.3, 0.9] }} 
+                    transition={{ repeat: Infinity, duration: 2, delay: 0.6 }}
+                    className="text-sm font-bold text-[#FF799C]/80 ml-2"
+                  >
+                    Z
+                  </motion.span>
+                  <motion.span 
+                    animate={{ y: [-5, -25], x: [0, 10, 0], opacity: [0, 1, 0], scale: [0.8, 1.4, 0.9] }} 
+                    transition={{ repeat: Infinity, duration: 2, delay: 1.2 }}
+                    className="text-md font-bold text-[#FF799C]/60 ml-4"
+                  >
+                    Z
+                  </motion.span>
+                </div>
+              )}
+
               {/* Halo background light glow */}
               <div className="absolute inset-0 m-auto h-24 w-24 rounded-full bg-gradient-to-tr from-[#FF799C]/20 to-[#FFD5E0]/45 blur-xl animate-pulse pointer-events-none" />
 
@@ -1037,12 +1368,23 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                   scale: [1, 1.25, 0.9, 1.18, 1],
                   rotate: [0, 18, -18, 6, 0],
                   y: [0, -30, 12, -6, 0]
+                } : petState === "sleeping" ? {
+                  y: [0, -3, 0],
+                  rotate: [18, 20, 16, 18] // Comfortable sleep tilt
+                } : petState === "sitting" ? {
+                  y: [0, -2, 0],
+                  scale: 0.96, // Comfy squish
+                  rotate: [0, 1, -1, 0]
                 } : {
                   y: [0, -7, 0],
                   rotate: [0, 0.6, -0.6, 0]
                 }}
                 transition={isDancing ? {
                   duration: 0.85,
+                  ease: "easeInOut"
+                } : petState === "sleeping" ? {
+                  duration: 5.5,
+                  repeat: Infinity,
                   ease: "easeInOut"
                 } : {
                   duration: 4.8,
@@ -1055,80 +1397,96 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                   width="135"
                   height="135"
                   viewBox="0 0 100 100"
-                  className="filter drop-shadow-[0_8px_18px_rgba(255,121,156,0.35)]"
+                  className="filter drop-shadow-[0_8px_18px_rgba(255,121,156,0.35)] overflow-visible"
                 >
                   <defs>
-                    {/* Fluffy Cotton Candy filter displacement */}
-                    <filter id="puffyCottonStar" x="-25%" y="-25%" width="150%" height="150%">
-                      <feTurbulence type="fractalNoise" baseFrequency="0.15" numOctaves="3" result="noise" />
-                      <feDisplacementMap in="SourceGraphic" in2="noise" scale="5.5" xChannelSelector="R" yChannelSelector="G" />
+                    {/* Enhanced Fluffy Cotton Candy filter displacement for correct fuzzy look */}
+                    <filter id="puffyCottonStar" x="-30%" y="-30%" width="160%" height="160%">
+                      <feTurbulence type="fractalNoise" baseFrequency="0.18" numOctaves="4" result="noise" />
+                      <feDisplacementMap in="SourceGraphic" in2="noise" scale="9.0" xChannelSelector="R" yChannelSelector="G" />
                     </filter>
 
-                    <linearGradient id="puffyPinkStarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#FFF2F6" />
-                      <stop offset="40%" stopColor="#FFCCD9" />
-                      <stop offset="80%" stopColor="#FF9EBD" />
-                      <stop offset="100%" stopColor="#FFCAD8" />
+                    <linearGradient id="compStarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FFF2F5" />
+                      <stop offset="50%" stopColor="#FFCCDD" />
+                      <stop offset="100%" stopColor="#FF799C" />
                     </linearGradient>
                   </defs>
 
-                  {/* Complete star shape, beautiful rounded Bezier peaks for complete cute aesthetic */}
-                  <path
-                    d="M 50 8 
-                       C 53 32 64 32 78 32 
-                       C 96 32 96 46 84 56 
-                       C 90 74 78 82 64 72 
-                       C 50 82 40 74 46 56 
-                       C 34 46 34 32 52 32 
-                       C 47 32 47 8 50 8 Z"
-                    fill="url(#puffyPinkStarGrad)"
-                    filter="url(#puffyCottonStar)"
-                    stroke="#FFF4F8"
-                    strokeWidth="2.5"
-                    strokeLinejoin="round"
-                  />
+                  {currentCustomSkin ? (
+                    /* User's custom hand-drawn pet star - fully customized, with marshmallow puffy filter correctly displayed */
+                    <image
+                      href={currentCustomSkin}
+                      x="0"
+                      y="0"
+                      width="100"
+                      height="100"
+                      filter="url(#puffyCottonStar)"
+                    />
+                  ) : (
+                    /* Default Star Companion shape - exactly like the right-corner star with pink bow and adorable face */
+                    <>
+                      {/* Star body */}
+                      <path
+                        d="M 50 5 L 63 37 L 97 37 L 70 58 L 81 92 L 50 72 L 19 92 L 30 58 L 3 37 L 37 37 Z"
+                        fill="url(#compStarGrad)"
+                        filter="url(#puffyCottonStar)"
+                        stroke="#FFF"
+                        strokeWidth="2.5"
+                        strokeLinejoin="round"
+                      />
 
-                  {/* Soft 3D volumetric light spheres to make it look like fluffy cotton candy mass */}
-                  <circle cx="50" cy="48" r="16" fill="rgba(255, 255, 255, 0.55)" filter="blur(6px)" pointerEvents="none" />
-                  <circle cx="36" cy="44" r="9" fill="rgba(255, 255, 255, 0.3)" filter="blur(4px)" pointerEvents="none" />
-                  <circle cx="64" cy="44" r="9" fill="rgba(255, 255, 255, 0.3)" filter="blur(4px)" pointerEvents="none" />
+                      {/* Soft 3D volumetric light spheres to make it look like fluffy cotton candy mass */}
+                      <circle cx="50" cy="48" r="16" fill="rgba(255, 255, 255, 0.45)" filter="blur(6px)" pointerEvents="none" />
 
-                  {/* Lovely Face details */}
-                  <g transform="translate(0, 4)">
-                    {expression === "blink" ? (
-                      <>
-                        <path d="M 38 46 Q 42 50 46 46" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                        <path d="M 54 46 Q 58 50 62 46" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                      </>
-                    ) : expression === "happy" ? (
-                      <>
-                        <path d="M 37 48 Q 41 42 45 48" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                        <path d="M 55 48 Q 59 42 63 48" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                      </>
-                    ) : expression === "shy" ? (
-                      <>
-                        <circle cx="41" cy="47" r="2.5" fill="#6E4B55" />
-                        <circle cx="59" cy="47" r="2.5" fill="#6E4B55" />
-                      </>
-                    ) : (
-                      <>
-                        {/* Starry eyes */}
-                        <path d="M 37 47 L 43 47 M 40 44 L 40 50" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" />
-                        <path d="M 57 47 L 63 47 M 60 44 L 60 50" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" />
-                      </>
-                    )}
+                      {/* Pink bow on left star tip */}
+                      <g transform="translate(0, 0)">
+                        <path d="M 28 30 Q 23 25 28 20 Q 33 25 28 30 Z" fill="#FF799C" stroke="#FFF" strokeWidth="1" />
+                        <path d="M 28 30 Q 33 35 28 40 Q 23 35 28 30 Z" fill="#FF799C" stroke="#FFF" strokeWidth="1" />
+                        <circle cx="28" cy="30" r="2.5" fill="#FFCCDD" stroke="#FFF" strokeWidth="0.8" />
+                      </g>
 
-                    {/* Blushing cheeks */}
-                    <ellipse cx="33" cy="52" rx="6" ry="4" fill="#FF4B72" opacity="0.65" />
-                    <ellipse cx="67" cy="52" rx="6" ry="4" fill="#FF4B72" opacity="0.65" />
+                      {/* Blushing cheeks */}
+                      <ellipse cx="36" cy="54" rx="5" ry="3" fill="#FF799C" opacity="0.6" />
+                      <ellipse cx="64" cy="54" rx="5" ry="3" fill="#FF799C" opacity="0.6" />
 
-                    {/* Cute mouth */}
-                    {expression === "happy" || expression === "glow" ? (
-                      <path d="M 46 52 Q 50 56 54 52" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                    ) : (
-                      <path d="M 47 52 Q 50 54 53 52" stroke="#6E4B55" strokeWidth="2.2" strokeLinecap="round" fill="none" />
-                    )}
-                  </g>
+                      {/* Cute Eyes & Mouth */}
+                      <g transform="translate(0, 0)">
+                        {petState === "sleeping" || expression === "blink" ? (
+                          <>
+                            <path d="M 38 46 Q 42 50 46 46" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                            <path d="M 54 46 Q 58 50 62 46" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                          </>
+                        ) : expression === "happy" ? (
+                          <>
+                            <circle cx="41" cy="48" r="3.5" fill="#6E4B55" />
+                            <circle cx="59" cy="48" r="3.5" fill="#6E4B55" />
+                            <circle cx="39.5" cy="46" r="1.2" fill="#FFF" />
+                            <circle cx="57.5" cy="46" r="1.2" fill="#FFF" />
+                          </>
+                        ) : expression === "shy" ? (
+                          <>
+                            <circle cx="41" cy="47" r="2.5" fill="#6E4B55" />
+                            <circle cx="59" cy="47" r="2.5" fill="#6E4B55" />
+                          </>
+                        ) : (
+                          <>
+                            <path d="M 37 47 L 43 47 M 40 44 L 40 50" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" />
+                            <path d="M 57 47 L 63 47 M 60 44 L 60 50" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" />
+                          </>
+                        )}
+
+                        {/* Cute mouth */}
+                        {petState === "sleeping" ? (
+                          <path d="M 48 53 Q 50 51 52 53" stroke="#6E4B55" strokeWidth="2" strokeLinecap="round" fill="none" />
+                        ) : expression === "happy" || expression === "glow" ? (
+                          <path d="M 46 54 Q 50 58 54 54" stroke="#6E4B55" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                        ) : (
+                          <path d="M 47 54 Q 50 56 53 54" stroke="#6E4B55" strokeWidth="2.2" strokeLinecap="round" fill="none" />
+                        )}
+                      </g>
+                    </>
+                  )}
                 </svg>
 
                 <div className="absolute top-2 left-6 text-yellow-300 text-sm animate-pulse">⭐</div>
@@ -1189,7 +1547,60 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                 />
               </div>
             </div>
+
+            {/* Custom Drawing Skin Action */}
+            <div className="pt-2 border-t border-[#FF799C]/10 flex gap-2">
+              <button
+                onClick={() => setIsCanvasOpen(true)}
+                className="flex-1 bg-[#FF799C] hover:bg-[#FF799C]/90 text-white rounded-xl py-2 px-3 text-xs font-semibold tracking-wide transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                title="為寵物繪製個性外觀"
+              >
+                <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                <span>🎨 繪製寵物外觀</span>
+              </button>
+              {currentCustomSkin && (
+                <button
+                  onClick={() => {
+                    if (confirm("確定要清除自定義繪製外觀並還原成經典樣貌嗎？")) {
+                      handleClearCustomSkin();
+                    }
+                  }}
+                  className="bg-[#FFF0F3] hover:bg-[#FFE0E6] border border-[#FF799C]/20 text-[#FF799C] rounded-xl py-2 px-3 text-xs font-medium transition-all active:scale-95 cursor-pointer shrink-0"
+                  title="還原為原始模樣"
+                >
+                  還原
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* CO-PARENTING / GUARDIANS LIST PANEL */}
+          {(activeTab === "coparent" || activeTab === "friend") && (
+            <div className="bg-[#FFF4F7]/90 border border-[#FF799C]/20 rounded-2xl p-4 space-y-2.5">
+              <h3 className="text-xs font-bold text-[#FF799C] flex items-center gap-1.5">
+                <Users className="h-4 w-4" />
+                <span>👥 {activeTab === "coparent" ? "共同飼養星家守護成員" : "本家園共同飼養與守護成員"}</span>
+              </h3>
+              <div className="flex gap-2 flex-wrap pt-0.5">
+                {(activeTab === "coparent" ? activeGroupMembers : visitedGroupMembers).length > 0 ? (
+                  (activeTab === "coparent" ? activeGroupMembers : visitedGroupMembers).map((m: any) => (
+                    <div key={m.id} className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-[#FF799C]/10 shadow-sm">
+                      <img src={m.avatar} alt={m.username} className="w-5 h-5 rounded-full border border-[#FF799C]/10 shrink-0" referrerPolicy="no-referrer" />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[9.5px] text-gray-700 font-bold leading-tight">{m.username}</span>
+                        <span className="text-[7.5px] text-gray-400 font-mono leading-none">ID: {m.id}</span>
+                      </div>
+                      {m.id === (activeTab === "coparent" ? activeGroup?.creatorId : (selectedVisitedGroup?.creatorId || visitingFriend?.id)) && (
+                        <span className="text-[7.5px] bg-[#FF799C] text-white px-1.5 py-0.2 rounded-full font-bold scale-90">家長</span>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-[10px] text-gray-400 italic">載入成員清單中...</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* CHAT / INTERACTION PANEL */}
           <div className="bg-white/60 border border-[#FF799C]/15 rounded-2xl p-4">
@@ -1239,7 +1650,19 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                 <button
                   type="button"
                   key={item.id}
-                  onClick={() => setSelectedFurnitureId(item.id)}
+                  onClick={() => {
+                    setSelectedFurnitureId(item.id);
+                    if (item.id === "bed") {
+                      setPetState("sleeping");
+                      setBubbleText(`${currentPetName} 躺在軟綿綿的草莓棉花糖大床上，正甜甜地睡著呢... 🐑 zZZ (點擊寵物可喚醒)`);
+                    } else if (item.id === "sofa") {
+                      setPetState("sitting");
+                      setBubbleText(`${currentPetName} 舒服地坐在蜜桃雲朵沙發上，晃晃小腿感覺超級愜意！🌸 (點擊寵物可站立)`);
+                    } else if (item.id === "fridge") {
+                      setIsFridgeOpen(true);
+                      setFridgeMessage(`🍰 歡迎光臨草莓波點冰箱！點擊食物餵食 ${currentPetName}，或是採購更多美味吧！`);
+                    }
+                  }}
                   className={`border text-left p-2 rounded-xl transition-all active:scale-95 flex items-center gap-2 cursor-pointer bg-white ${selectedFurnitureId === item.id ? "border-[#FF799C] bg-[#FFF2F5] shadow-sm shadow-[#FF799C]/10" : "border-[#FF799C]/10 hover:bg-[#FFF6F2]"}`}
                 >
                   <div className="w-10 h-10 shrink-0 bg-[#FF799C]/5 rounded-lg flex items-center justify-center border border-[#FF799C]/10">
@@ -1503,6 +1926,36 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
                         <div key={friend.id} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-xl border border-gray-100 shrink-0 shadow-sm">
                           <img src={friend.avatar} alt="Avatar" className="w-4.5 h-4.5 rounded-full" />
                           <span className="text-[9px] text-gray-600 font-bold">{friend.username}</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const res = await fetch("/api/friends/interact", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ userId: currentUser?.id, targetId: friend.id })
+                                });
+                                const data = await res.json();
+                                if (res.ok) {
+                                  alert(data.message);
+                                } else {
+                                  alert(data.error || "互動失敗");
+                                }
+                              } catch (e) {
+                                console.error(e);
+                              }
+                            }}
+                            className="bg-[#FF799C]/10 hover:bg-[#FF799C]/20 text-[#FF799C] text-[8px] font-bold px-1.5 py-0.5 rounded-lg ml-1 shrink-0 transition-all cursor-pointer active:scale-95 animate-pulse"
+                          >
+                            互動 ✦
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleVisitFriendRoom(friend.id)}
+                            className="bg-pink-100 hover:bg-[#FF799C]/20 text-[#FF799C] text-[8px] font-bold px-1.5 py-0.5 rounded-lg ml-1 shrink-0 transition-all cursor-pointer active:scale-95"
+                          >
+                            參訪 🏡
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1621,6 +2074,19 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* CUSTOM PAINT CANVAS MODAL BOARD */}
+      <AnimatePresence>
+        {isCanvasOpen && (
+          <PetsCanvasBoard
+            isOpen={isCanvasOpen}
+            onClose={() => setIsCanvasOpen(false)}
+            onSave={handleSaveCustomSkin}
+            initialDataUrl={currentCustomSkin}
+            petName={currentPetName}
+          />
         )}
       </AnimatePresence>
 
