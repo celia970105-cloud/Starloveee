@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { User } from "../types";
 import PetsCanvasBoard from "./PetsCanvasBoard";
+import PlogModule from "./PlogModule";
 
 interface PetsModuleProps {
   currentUser: User | null;
@@ -209,8 +210,8 @@ interface FallingItem {
 export default function PetsModule({ currentUser }: PetsModuleProps) {
   const localKey = `local_star_pet_guest`;
 
-  // Toggle Modes: "single" (Solo/Local) or "coparent" (Shared Home) or "friend" (Visiting Friend)
-  const [activeTab, setActiveTab] = useState<"single" | "coparent" | "friend">("single");
+  // Toggle Modes: "single" (Solo/Local) or "coparent" (Shared Home) or "friend" (Visiting Friend) or "plog" (PLOG Collage)
+  const [activeTab, setActiveTab] = useState<"single" | "coparent" | "friend" | "plog">("single");
 
   // Friend Visitation State
   const [visitingFriend, setVisitingFriend] = useState<any | null>(null);
@@ -985,9 +986,18 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
               setVisitingFriend(null);
               setActiveTab("coparent");
             }}
-            className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 ${activeTab === "coparent" ? "bg-[#FF799C] text-white shadow-sm" : "text-[#6E4B55]/70 hover:text-[#FF799C]"}`}
+            className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${activeTab === "coparent" ? "bg-[#FF799C] text-white shadow-sm" : "text-[#6E4B55]/70 hover:text-[#FF799C]"}`}
           >
             <Users className="h-3 w-3" /> 2~6人共同飼養星家
+          </button>
+          <button
+            onClick={() => {
+              setVisitingFriend(null);
+              setActiveTab("plog");
+            }}
+            className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${activeTab === "plog" ? "bg-[#FF799C] text-white shadow-sm" : "text-[#6E4B55]/70 hover:text-[#FF799C]"}`}
+          >
+            <Camera className="h-3.5 w-3.5" /> 📸 PLOG 拼圖記錄
           </button>
           {activeTab === "friend" && (
             <button
@@ -1072,8 +1082,9 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
         )}
 
         {/* Title Name Customizer Header */}
-        <div className="flex items-center justify-center gap-3 mt-1">
-          {activeTab === "single" ? (
+        {activeTab !== "plog" && (
+          <div className="flex items-center justify-center gap-3 mt-1">
+            {activeTab === "single" ? (
             isEditingSoloName ? (
               <div className="flex items-center gap-1.5 bg-white/95 border border-[#FF799C]/40 rounded-full px-3.5 py-1 shadow-sm">
                 <input
@@ -1159,10 +1170,15 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
             )
           )}
         </div>
+        )}
       </div>
 
-      {/* Grid: Left Room Playground, Right Control panels */}
-      <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 my-6 items-stretch flex-1">
+      {activeTab === "plog" ? (
+        <div className="relative z-10 w-full my-6 flex-1">
+          <PlogModule currentUser={currentUser} />
+        </div>
+      ) : (
+        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 my-6 items-stretch flex-1">
         
         {/* LEFT COLUMN: THE DECORATION PLAYGROUND (7 Cols) */}
         <div className="lg:col-span-7 flex flex-col items-center justify-between bg-white/40 border border-[#FF799C]/15 rounded-[28px] p-4 min-h-[380px]">
@@ -1969,6 +1985,7 @@ export default function PetsModule({ currentUser }: PetsModuleProps) {
         </div>
 
       </div>
+      )}
 
       {/* REFRIGERATOR OVERLAY CONTAINER (Sliding Popup Modal) */}
       <AnimatePresence>
