@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "id": "admin",
+      "username": "CeliaAdmin",
+      "email": "celia970105@gmail.com",
+      "password": "Aa0955283881",
+      "role": "admin",
+      "avatar": "https://api.dicebear.com/7.x/adventurer/svg?seed=celia",
+      "background": "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=1200"
+    }
+  ],
+  "posts_photos": [],
+  "posts_videos": [],
+  "posts_letters": [],
+  "posts_artworks": [],
+  "posts_music": [],
+  "pets": []
+}
